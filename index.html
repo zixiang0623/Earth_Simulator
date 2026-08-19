@@ -443,23 +443,31 @@ const CAR_MODEL_LAYER_ID = 'car-model-layer';
 const CAR_YAW_OFFSET = 0;
 
 // speed is stored in km/h for HUD consistency; convert to m/s only when moving.
-const carState = { lng:0, lat:0, heading:0, speed:0, altitude:0, vspeed:0 };
+const carState = { lng:0, lat:0, heading:0, speed:0 };
+const cameraState = { lng:0, lat:0, heading:0, initialized:false };
 const KMH_PER_MPS = 3.6;
 const MACH_1_KMH = 1225.044;
 const MACH_3_KMH = MACH_1_KMH*3;
 
-// One vehicle: a flying car. It drives at ground level like a normal car, and
-// Space/Shift let it climb — the eye height simply rides on top of altitude.
-const CARPHYS = {
-  eyeHeight:1.15, forwardOffset:0.25,
-  pitchBase:89, pitchMin:77, pitchMax:89,
-  lookPitchMin:-30, lookPitchMax:10,
-  maxSpeed:MACH_3_KMH, accel:36, brakeDecel:80, drag:18, turnRateMax:75
-};
-const FLIGHT = {
-  climbAccel:26,        // m/s^2 of vertical speed while Space/Shift held
-  maxVSpeed:40,         // m/s cap on climb/descent rate
-  vDrag:22               // m/s^2 — vertical speed bleeds off fast when released, so it hovers
+// Two selectable vehicle presets. "car" hugs the ground; "plane" is the old
+// high, sweeping first-person view, kept exactly as a selectable mode.
+const VEHICLE = {
+  car:{
+    label:'車', icon:'🚗',
+    eyeHeight:1.15, forwardOffset:0.25,
+    pitchBase:89, pitchMin:77, pitchMax:89,
+    lookPitchMin:-12, lookPitchMax:5,
+    maxSpeed:MACH_3_KMH, accel:36, brakeDecel:80, drag:18, turnRateMax:75,
+    zoomHint:19
+  },
+  plane:{
+    label:'飛行機', icon:'✈️',
+    eyeHeight:220, forwardOffset:0,
+    pitchBase:80, pitchMin:55, pitchMax:85,
+    lookPitchMin:-25, lookPitchMax:20,
+    maxSpeed:MACH_3_KMH, accel:24, brakeDecel:60, drag:12, turnRateMax:35,
+    zoomHint:14
+  }
 };
 
 const LOOK = { yawRate:110, pitchRate:70, yawMax:110 };
@@ -468,6 +476,24 @@ let joyThrottle = 0, joySteer = 0;
 let lookYaw = 0, lookPitch = 0;
 const keyState = { w:false, s:false, a:false, d:false, left:false, right:false, up:false, down:false, ascend:false, descend:false };
 
+function shortestAngleDelta(fromDeg, toDeg){
+  return ((toDeg-fromDeg+540)%360)-180;
+}
+function smoothCameraState(dt){
+  if(!cameraState.initialized){
+    cameraState.lng = carState.lng;
+    cameraState.lat = carState.lat;
+    cameraState.heading = carState.heading;
+    cameraState.initialized = true;
+    return;
+  }
+  // Keep high-altitude / high-speed free-camera updates visually stable while
+  // still converging quickly to the real physics position.
+  const alpha = 1-Math.exp(-16*dt);
+  cameraState.lng += (carState.lng-cameraState.lng)*alpha;
+  cameraState.lat += (carState.lat-cameraState.lat)*alpha;
+  cameraState.heading = (cameraState.heading + shortestAngleDelta(cameraState.heading, carState.heading)*alpha + 360) % 360;
+}
 function destPoint(lngLat, headingDeg, distMeters){
   const rad = headingDeg*Math.PI/180;
   const dNorth = distMeters*Math.cos(rad), dEast = distMeters*Math.sin(rad);
@@ -523,19 +549,27 @@ function driveStep(dt){
   updateLook(dt);
   return throttle;
 }
-function updateDriveCamera(throttleVal){
-  const p = CARPHYS;
-  // Camera sits at the driver's-seat position; altitude just rides on top of the
-  // base eye height, so climbing with Space smoothly lifts the whole cockpit.
-  const eyePos = destPoint([carState.lng, carState.lat], carState.heading, p.forwardOffset);
-  const camPos = mapboxgl.MercatorCoordinate.fromLngLat(eyePos, p.eyeHeight + carState.altitude);
+function updateDriveCamera(throttleVal, dt){
+  const p = VEHICLE[vehicleMode];
+  smoothCameraState(dt);
+  // Camera sits at the driver's-seat / cockpit position, offset from the model's
+  // own footprint by the active preset (ground-level for car, high for plane).
+  const eyePos = destPoint([cameraState.lng, cameraState.lat], cameraState.heading, p.forwardOffset);
+  const camPos = mapboxgl.MercatorCoordinate.fromLngLat(eyePos, p.eyeHeight);
   const camera = map.getFreeCameraOptions();
   camera.position = camPos;
-  const bearing = (carState.heading + lookYaw + 360) % 360;
-  // A little nose-up/down tilt from vertical speed sells the climb/descend feel.
-  const climbTilt = Math.max(-6, Math.min(6, carState.vspeed*0.4));
-  const pitch = Math.max(p.pitchMin, Math.min(p.pitchMax, p.pitchBase + lookPitch + climbTilt));
-  camera.setPitchBearing(pitch, bearing);
+  const bearing = (cameraState.heading + lookYaw + 360) % 360;
+  const pitch = Math.max(p.pitchMin, Math.min(p.pitchMax, p.pitchBase + lookPitch));
+  // At high altitude, repeatedly forcing pitch/bearing can jitter as Mapbox
+  // reconciles the free-camera orientation. Looking at a point on the route is
+  // more stable and keeps the target farther away as altitude increases.
+  if(camera.lookAtPoint){
+    const lookDownDeg = Math.max(2, 90-pitch);
+    const lookAheadMeters = Math.min(50000, Math.max(20, p.eyeHeight/Math.tan(lookDownDeg*Math.PI/180)));
+    camera.lookAtPoint(destPoint(eyePos, bearing, lookAheadMeters));
+  }else{
+    camera.setPitchBearing(pitch, bearing);
+  }
   map.setFreeCameraOptions(camera);
 
   // Model update is separately try/caught: if this fails, the camera above must
@@ -569,8 +603,7 @@ function updateDriveCamera(throttleVal){
 }
 function updateDriveHUD(){
   const kmh = Math.round(Math.abs(carState.speed));
-  const alt = Math.round(carState.altitude);
-  document.getElementById('joy-speed').innerHTML = `${kmh}<span>km/h</span>` + (alt>0 ? ` <span style="margin-left:6px">ALT ${alt}m</span>` : '');
+  document.getElementById('joy-speed').innerHTML = `${kmh}<span>km/h</span>`;
 }
 function driveLoop(ts){
   if(lastDriveTs===null) lastDriveTs = ts;
@@ -578,7 +611,7 @@ function driveLoop(ts){
   lastDriveTs = ts;
   try{
     const throttleVal = driveStep(dt);
-    updateDriveCamera(throttleVal);
+    updateDriveCamera(throttleVal, dt);
     updateDriveHUD();
   }catch(err){
     console.error('driveLoop step failed:', err);
@@ -600,8 +633,8 @@ function enterDriveMode(){
   Object.keys(keyState).forEach(k=> keyState[k]=false);
 
   const c = map.getCenter();
-  carState.lng = c.lng; carState.lat = c.lat; carState.heading = map.getBearing()||0;
-  carState.speed = 0; carState.altitude = 0; carState.vspeed = 0;
+  carState.lng = c.lng; carState.lat = c.lat; carState.heading = map.getBearing()||0; carState.speed = 0;
+  cameraState.lng = carState.lng; cameraState.lat = carState.lat; cameraState.heading = carState.heading; cameraState.initialized = true;
   if(map.getLayer(CAR_MODEL_LAYER_ID)) map.setLayoutProperty(CAR_MODEL_LAYER_ID, 'visibility', 'visible');
 
   // Force the map out of low-zoom globe rendering *synchronously* before the
