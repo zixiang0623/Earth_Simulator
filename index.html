@@ -430,7 +430,11 @@ const CAR_MODEL_LAYER_ID = 'car-model-layer';
 // If the model appears to be facing sideways/backwards relative to travel, adjust this.
 const CAR_YAW_OFFSET = 0;
 
+// speed is stored in km/h for HUD consistency; convert to m/s only when moving.
 const carState = { lng:0, lat:0, heading:0, speed:0 };
+const KMH_PER_MPS = 3.6;
+const MACH_1_KMH = 1225.044;
+const MACH_3_KMH = MACH_1_KMH*3;
 
 // Two selectable vehicle presets. "car" hugs the ground; "plane" is the old
 // high, sweeping first-person view, kept exactly as a selectable mode.
@@ -440,7 +444,7 @@ const VEHICLE = {
     eyeHeight:1.15, forwardOffset:0.25,
     pitchBase:89, pitchMin:77, pitchMax:89,
     lookPitchMin:-12, lookPitchMax:5,
-    maxSpeed:26, accel:9, brakeDecel:16, drag:4.2, turnRateMax:75,
+    maxSpeed:MACH_3_KMH, accel:36, brakeDecel:80, drag:18, turnRateMax:75,
     zoomHint:19
   },
   plane:{
@@ -448,7 +452,7 @@ const VEHICLE = {
     eyeHeight:220, forwardOffset:0,
     pitchBase:80, pitchMin:55, pitchMax:85,
     lookPitchMin:-25, lookPitchMax:20,
-    maxSpeed:60, accel:6, brakeDecel:10, drag:2.0, turnRateMax:35,
+    maxSpeed:MACH_3_KMH, accel:24, brakeDecel:60, drag:12, turnRateMax:35,
     zoomHint:14
   }
 };
@@ -489,13 +493,13 @@ function driveStep(dt){
   }
   carState.speed = Math.max(-p.maxSpeed*0.4, Math.min(p.maxSpeed, carState.speed));
 
-  const speedFactor = Math.max(0.25, Math.min(1, Math.abs(carState.speed)/8));
+  const speedFactor = Math.max(0.25, Math.min(1, Math.abs(carState.speed)/(8*KMH_PER_MPS)));
   let turn = steer*p.turnRateMax*speedFactor;
   if(carState.speed < 0) turn = -turn;
   carState.heading = (carState.heading + turn*dt + 360) % 360;
 
   const rad = carState.heading*Math.PI/180;
-  const dist = carState.speed*dt;
+  const dist = (carState.speed/KMH_PER_MPS)*dt;
   const dNorth = dist*Math.cos(rad), dEast = dist*Math.sin(rad);
   const latRad = carState.lat*Math.PI/180;
   carState.lat += dNorth/111320;
@@ -549,7 +553,7 @@ function updateDriveCamera(throttleVal){
   }
 }
 function updateDriveHUD(){
-  const kmh = Math.round(Math.abs(carState.speed*110));
+  const kmh = Math.round(Math.abs(carState.speed));
   document.getElementById('joy-speed').innerHTML = `${kmh}<span>km/h</span>`;
 }
 function driveLoop(ts){
