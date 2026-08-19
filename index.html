@@ -431,6 +431,9 @@ const CAR_MODEL_LAYER_ID = 'car-model-layer';
 const CAR_YAW_OFFSET = 0;
 
 const carState = { lng:0, lat:0, heading:0, speed:0 };
+const KMH_PER_SPEED_UNIT = 110;
+const MACH_1_KMH = 1225.044;
+const MACH_3_SPEED_UNITS = (MACH_1_KMH*3)/KMH_PER_SPEED_UNIT;
 
 // Two selectable vehicle presets. "car" hugs the ground; "plane" is the old
 // high, sweeping first-person view, kept exactly as a selectable mode.
@@ -440,7 +443,7 @@ const VEHICLE = {
     eyeHeight:1.15, forwardOffset:0.25,
     pitchBase:89, pitchMin:77, pitchMax:89,
     lookPitchMin:-12, lookPitchMax:5,
-    maxSpeed:26, accel:9, brakeDecel:16, drag:4.2, turnRateMax:75,
+    maxSpeed:MACH_3_SPEED_UNITS, accel:9, brakeDecel:16, drag:4.2, turnRateMax:75,
     zoomHint:19
   },
   plane:{
@@ -448,7 +451,7 @@ const VEHICLE = {
     eyeHeight:220, forwardOffset:0,
     pitchBase:80, pitchMin:55, pitchMax:85,
     lookPitchMin:-25, lookPitchMax:20,
-    maxSpeed:60, accel:6, brakeDecel:10, drag:2.0, turnRateMax:35,
+    maxSpeed:MACH_3_SPEED_UNITS, accel:6, brakeDecel:10, drag:2.0, turnRateMax:35,
     zoomHint:14
   }
 };
@@ -549,7 +552,7 @@ function updateDriveCamera(throttleVal){
   }
 }
 function updateDriveHUD(){
-  const kmh = Math.round(Math.abs(carState.speed*110));
+  const kmh = Math.round(Math.abs(carState.speed*KMH_PER_SPEED_UNIT));
   document.getElementById('joy-speed').innerHTML = `${kmh}<span>km/h</span>`;
 }
 function driveLoop(ts){
