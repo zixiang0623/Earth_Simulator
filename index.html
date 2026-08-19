@@ -538,7 +538,16 @@ function updateDriveCamera(throttleVal, dt){
   camera.position = camPos;
   const bearing = (cameraState.heading + lookYaw + 360) % 360;
   const pitch = Math.max(p.pitchMin, Math.min(p.pitchMax, p.pitchBase + lookPitch));
-  camera.setPitchBearing(pitch, bearing);
+  // At high altitude, repeatedly forcing pitch/bearing can jitter as Mapbox
+  // reconciles the free-camera orientation. Looking at a point on the route is
+  // more stable and keeps the target farther away as altitude increases.
+  if(camera.lookAtPoint){
+    const lookDownDeg = Math.max(2, 90-pitch);
+    const lookAheadMeters = Math.min(50000, Math.max(20, p.eyeHeight/Math.tan(lookDownDeg*Math.PI/180)));
+    camera.lookAtPoint(destPoint(eyePos, bearing, lookAheadMeters));
+  }else{
+    camera.setPitchBearing(pitch, bearing);
+  }
   map.setFreeCameraOptions(camera);
 
   // Model update is separately try/caught: if this fails, the camera above must
