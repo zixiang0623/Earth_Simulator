@@ -112,8 +112,14 @@
     background:linear-gradient(135deg,var(--accent),#1a6fc4); box-shadow:0 4px 14px rgba(0,0,0,0.35);
     cursor:grab; touch-action:none;}
   body.drive-active #joy-knob{background:linear-gradient(135deg,#ff9f0a,#d9790a);}
-  #joy-hint{font-size:10px; color:var(--dim); letter-spacing:0.02em; transition:opacity .3s ease;}
+  #joy-hint{font-size:10px; color:var(--dim); letter-spacing:0.02em; transition:opacity .3s ease; text-align:center; max-width:180px;}
   body.drive-active #joy-hint{opacity:0;}
+
+  #joy-row{display:flex; align-items:center; gap:10px;}
+  #fly-controls{display:flex; flex-direction:column; gap:8px;}
+  .fly-btn{width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center;
+    font-size:14px; color:var(--text); cursor:pointer; touch-action:none;}
+  .fly-btn:active{background:rgba(63,168,255,0.25); border-color:var(--accent);}
 
   /* ===== 3D-style car marker (drive mode) ===== */
   #car-marker{width:30px; height:50px; position:relative;}
@@ -166,11 +172,17 @@
 
   <div id="joy-zone">
     <div id="joy-speed" class="glass">0<span>km/h</span></div>
-    <div id="joy-pad" class="glass">
-      <div id="joy-arrow">▲</div>
-      <div id="joy-knob"><span id="joy-doll">🧍</span></div>
+    <div id="joy-row">
+      <div id="fly-controls">
+        <div class="fly-btn glass" id="fly-up">▲</div>
+        <div class="fly-btn glass" id="fly-down">▼</div>
+      </div>
+      <div id="joy-pad" class="glass">
+        <div id="joy-arrow">▲</div>
+        <div id="joy-knob"><span id="joy-doll">🧍</span></div>
+      </div>
     </div>
-    <div id="joy-hint">WASDで運転 / Esc で解除</div>
+    <div id="joy-hint">WASDで運転・Space/Shiftで上昇下降 / Esc で解除</div>
   </div>
 
   <div id="info-sheet" class="glass">
@@ -457,13 +469,12 @@ const VEHICLE = {
     zoomHint:14
   }
 };
-let vehicleMode = 'car';
 
 const LOOK = { yawRate:110, pitchRate:70, yawMax:110 };
 let driveMode = false, driveLoopId = null, lastDriveTs = null;
 let joyThrottle = 0, joySteer = 0;
 let lookYaw = 0, lookPitch = 0;
-const keyState = { w:false, s:false, a:false, d:false, left:false, right:false, up:false, down:false };
+const keyState = { w:false, s:false, a:false, d:false, left:false, right:false, up:false, down:false, ascend:false, descend:false };
 
 function shortestAngleDelta(fromDeg, toDeg){
   return ((toDeg-fromDeg+540)%360)-180;
@@ -490,14 +501,13 @@ function destPoint(lngLat, headingDeg, distMeters){
   return [ lngLat[0] + dEast/(111320*Math.cos(latRad)), lngLat[1] + dNorth/111320 ];
 }
 function updateLook(dt){
-  const p = VEHICLE[vehicleMode];
   const yawInput = (keyState.right?1:0) - (keyState.left?1:0);
   const pitchInput = (keyState.up?1:0) - (keyState.down?1:0);
   lookYaw = Math.max(-LOOK.yawMax, Math.min(LOOK.yawMax, lookYaw + yawInput*LOOK.yawRate*dt));
-  lookPitch = Math.max(p.lookPitchMin, Math.min(p.lookPitchMax, lookPitch + pitchInput*LOOK.pitchRate*dt));
+  lookPitch = Math.max(CARPHYS.lookPitchMin, Math.min(CARPHYS.lookPitchMax, lookPitch + pitchInput*LOOK.pitchRate*dt));
 }
 function driveStep(dt){
-  const p = VEHICLE[vehicleMode];
+  const p = CARPHYS;
   const kt = (keyState.w?1:0) - (keyState.s?1:0);
   const ks = (keyState.d?1:0) - (keyState.a?1:0);
   const throttle = Math.max(-1, Math.min(1, joyThrottle + kt));
@@ -523,6 +533,18 @@ function driveStep(dt){
   const latRad = carState.lat*Math.PI/180;
   carState.lat += dNorth/111320;
   carState.lng += dEast/(111320*Math.cos(latRad));
+
+  // Vertical flight: Space climbs, Shift/C descends, no input hovers (bleeds to 0).
+  const vInput = (keyState.ascend?1:0) - (keyState.descend?1:0);
+  if(vInput!==0) carState.vspeed += vInput*FLIGHT.climbAccel*dt;
+  else{
+    const s = Math.sign(carState.vspeed);
+    carState.vspeed -= s*FLIGHT.vDrag*dt;
+    if(Math.sign(carState.vspeed)!==s) carState.vspeed = 0;
+  }
+  carState.vspeed = Math.max(-FLIGHT.maxVSpeed, Math.min(FLIGHT.maxVSpeed, carState.vspeed));
+  carState.altitude += carState.vspeed*dt;
+  if(carState.altitude <= 0){ carState.altitude = 0; if(carState.vspeed<0) carState.vspeed = 0; }
 
   updateLook(dt);
   return throttle;
@@ -552,11 +574,9 @@ function updateDriveCamera(throttleVal, dt){
 
   // Model update is separately try/caught: if this fails, the camera above must
   // still have moved, so driving never silently freezes because of the model.
-  // Only shown in car mode — there's no plane model, and it'd sit oddly under a
-  // camera that's 200m up anyway.
   try{
     const modelSource = map.getSource(CAR_MODEL_SOURCE_ID);
-    if(modelSource && modelSource.setModels && vehicleMode==='car'){
+    if(modelSource && modelSource.setModels){
       const braking = throttleVal < -0.05 ? 1 : 0;
       const brakePaint = {
         'model-color': [0.85, 0.06, 0.06],
@@ -567,7 +587,7 @@ function updateDriveCamera(throttleVal, dt){
         car:{
           uri:CAR_MODEL_URI,
           position:[carState.lng, carState.lat],
-          orientation:[0, 0, carState.heading + CAR_YAW_OFFSET],
+          orientation:[0, -climbTilt, carState.heading + CAR_YAW_OFFSET],
           materialOverrides:{
             'lights_brakes': brakePaint,
             'lights-brakes_reverse': brakePaint,
@@ -617,9 +637,14 @@ function enterDriveMode(){
   cameraState.lng = carState.lng; cameraState.lat = carState.lat; cameraState.heading = carState.heading; cameraState.initialized = true;
   if(map.getLayer(CAR_MODEL_LAYER_ID)) map.setLayoutProperty(CAR_MODEL_LAYER_ID, 'visibility', 'visible');
 
-  // Start driving on the very next frame — don't wait on a flyTo/moveend handshake,
-  // since setFreeCameraOptions() takes over the camera immediately anyway and any
-  // wait-for-animation step is just a chance for the loop to never start.
+  // Force the map out of low-zoom globe rendering *synchronously* before the
+  // FreeCamera loop takes over. Without this, the map can still think it's at
+  // globe-view zoom (e.g. ~1.7) even though the camera itself sits a meter off
+  // the ground, which renders as a warped, wide "helicopter/panorama" view.
+  // jumpTo is instant (no animation, no moveend wait), so it can't reintroduce
+  // the earlier "loop never starts" bug.
+  map.jumpTo({ center:[carState.lng, carState.lat], zoom:19, pitch:80, bearing:carState.heading });
+
   lastDriveTs = null;
   if(driveLoopId) cancelAnimationFrame(driveLoopId);
   driveLoopId = requestAnimationFrame(driveLoop);
@@ -634,7 +659,7 @@ function exitDriveMode(){
   map.easeTo({ pitch:0, bearing:0, duration:1400 });
 }
 
-/* keyboard: WASD drives, arrow keys look around, Esc exits */
+/* keyboard: WASD drives, arrow keys look around, Space/Shift fly, Esc exits */
 function isTypingTarget(){
   const el = document.activeElement;
   return el && (el.tagName==='INPUT' || el.tagName==='TEXTAREA');
@@ -650,6 +675,9 @@ window.addEventListener('keydown', e=>{
     case 'ArrowRight': keyState.right=true; if(!driveMode) enterDriveMode(); e.preventDefault(); break;
     case 'ArrowUp': keyState.up=true; if(!driveMode) enterDriveMode(); e.preventDefault(); break;
     case 'ArrowDown': keyState.down=true; if(!driveMode) enterDriveMode(); e.preventDefault(); break;
+    case 'Space': keyState.ascend=true; if(!driveMode) enterDriveMode(); e.preventDefault(); break;
+    case 'ShiftLeft': case 'ShiftRight': case 'KeyC':
+      keyState.descend=true; if(!driveMode) enterDriveMode(); e.preventDefault(); break;
     case 'Escape': exitDriveMode(); break;
   }
 });
@@ -664,6 +692,8 @@ window.addEventListener('keyup', e=>{
     case 'ArrowRight': keyState.right=false; break;
     case 'ArrowUp': keyState.up=false; break;
     case 'ArrowDown': keyState.down=false; break;
+    case 'Space': keyState.ascend=false; break;
+    case 'ShiftLeft': case 'ShiftRight': case 'KeyC': keyState.descend=false; break;
   }
 });
 
@@ -706,6 +736,19 @@ function joyRelease(e){
 }
 joyKnob.addEventListener('pointerup', joyRelease);
 joyKnob.addEventListener('pointercancel', joyRelease);
+
+/* touch fly buttons: same ascend/descend state the keyboard uses */
+function bindFlyBtn(id, prop){
+  const el = document.getElementById(id);
+  const on = e=>{ e.preventDefault(); if(!driveMode) enterDriveMode(); keyState[prop]=true; };
+  const off = e=>{ e.preventDefault(); keyState[prop]=false; };
+  el.addEventListener('pointerdown', on);
+  el.addEventListener('pointerup', off);
+  el.addEventListener('pointercancel', off);
+  el.addEventListener('pointerleave', off);
+}
+bindFlyBtn('fly-up', 'ascend');
+bindFlyBtn('fly-down', 'descend');
 </script>
 </body>
 </html>
