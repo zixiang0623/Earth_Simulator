@@ -451,7 +451,7 @@ const MACH_3_KMH = MACH_1_KMH*3;
 // One vehicle: a flying car. It drives at ground level like a normal car, and
 // Space/Shift let it climb — the eye height simply rides on top of altitude.
 const CARPHYS = {
-  eyeHeight:1.15, forwardOffset:0.25,
+  eyeHeight:0.75, forwardOffset:0.25,
   pitchBase:89, pitchMin:77, pitchMax:89,
   lookPitchMin:-30, lookPitchMax:10,
   maxSpeed:MACH_3_KMH, accel:36, brakeDecel:80, drag:18, turnRateMax:75
@@ -498,7 +498,7 @@ function driveStep(dt){
 
   const speedFactor = Math.max(0.25, Math.min(1, Math.abs(carState.speed)/(8*KMH_PER_MPS)));
   let turn = steer*p.turnRateMax*speedFactor;
-  if(carState.speed < 0) turn = -turn;
+  if(carState.speed < -1) turn = -turn; // deadzone avoids steering flicker right at a stop
   carState.heading = (carState.heading + turn*dt + 360) % 360;
 
   const rad = carState.heading*Math.PI/180;
@@ -523,6 +523,12 @@ function driveStep(dt){
   updateLook(dt);
   return throttle;
 }
+// Brake-light paint objects are created once, not every frame, to avoid
+// garbage-collection churn (a real source of camera stutter at 60fps).
+const BRAKE_PAINT_ON  = { 'model-color':[0.85,0.06,0.06], 'model-color-mix-intensity':1, 'model-emissive-strength':0.9 };
+const BRAKE_PAINT_OFF = { 'model-color':[0.85,0.06,0.06], 'model-color-mix-intensity':0, 'model-emissive-strength':0.15 };
+const BRAKE_VOLUME_ON  = { ...BRAKE_PAINT_ON,  'model-opacity':1 };
+const BRAKE_VOLUME_OFF = { ...BRAKE_PAINT_OFF, 'model-opacity':0 };
 function updateDriveCamera(throttleVal){
   const p = CARPHYS;
   // Camera sits at the driver's-seat position; altitude just rides on top of the
@@ -532,9 +538,7 @@ function updateDriveCamera(throttleVal){
   const camera = map.getFreeCameraOptions();
   camera.position = camPos;
   const bearing = (carState.heading + lookYaw + 360) % 360;
-  // A little nose-up/down tilt from vertical speed sells the climb/descend feel.
-  const climbTilt = Math.max(-6, Math.min(6, carState.vspeed*0.4));
-  const pitch = Math.max(p.pitchMin, Math.min(p.pitchMax, p.pitchBase + lookPitch + climbTilt));
+  const pitch = Math.max(p.pitchMin, Math.min(p.pitchMax, p.pitchBase + lookPitch));
   camera.setPitchBearing(pitch, bearing);
   map.setFreeCameraOptions(camera);
 
@@ -543,22 +547,19 @@ function updateDriveCamera(throttleVal){
   try{
     const modelSource = map.getSource(CAR_MODEL_SOURCE_ID);
     if(modelSource && modelSource.setModels){
-      const braking = throttleVal < -0.05 ? 1 : 0;
-      const brakePaint = {
-        'model-color': [0.85, 0.06, 0.06],
-        'model-color-mix-intensity': braking,
-        'model-emissive-strength': braking ? 0.9 : 0.15
-      };
+      const braking = throttleVal < -0.05;
+      const brakePaint = braking ? BRAKE_PAINT_ON : BRAKE_PAINT_OFF;
+      const volumePaint = braking ? BRAKE_VOLUME_ON : BRAKE_VOLUME_OFF;
       modelSource.setModels({
         car:{
           uri:CAR_MODEL_URI,
           position:[carState.lng, carState.lat],
-          orientation:[0, -climbTilt, carState.heading + CAR_YAW_OFFSET],
+          orientation:[0, 0, carState.heading + CAR_YAW_OFFSET],
           materialOverrides:{
             'lights_brakes': brakePaint,
             'lights-brakes_reverse': brakePaint,
-            'lights_brakes_volume': { ...brakePaint, 'model-opacity': braking },
-            'lights-brakes_reverse_volume': { ...brakePaint, 'model-opacity': braking }
+            'lights_brakes_volume': volumePaint,
+            'lights-brakes_reverse_volume': volumePaint
           }
         }
       });
@@ -570,7 +571,11 @@ function updateDriveCamera(throttleVal){
 function updateDriveHUD(){
   const kmh = Math.round(Math.abs(carState.speed));
   const alt = Math.round(carState.altitude);
-  document.getElementById('joy-speed').innerHTML = `${kmh}<span>km/h</span>` + (alt>0 ? ` <span style="margin-left:6px">ALT ${alt}m</span>` : '');
+  const html = `${kmh}<span>km/h</span>` + (alt>0 ? ` <span style="margin-left:6px">ALT ${alt}m</span>` : '');
+  if(html !== updateDriveHUD._last){
+    updateDriveHUD._last = html;
+    (updateDriveHUD._el || (updateDriveHUD._el = document.getElementById('joy-speed'))).innerHTML = html;
+  }
 }
 function driveLoop(ts){
   if(lastDriveTs===null) lastDriveTs = ts;
