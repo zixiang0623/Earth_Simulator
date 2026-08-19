@@ -457,7 +457,6 @@ const CARPHYS = {
   maxSpeed:MACH_3_KMH, accel:36, brakeDecel:80, drag:18, turnRateMax:75
 };
 const FLIGHT = {
-  maxAltitude:400,      // meters — ceiling
   climbAccel:26,        // m/s^2 of vertical speed while Space/Shift held
   maxVSpeed:40,         // m/s cap on climb/descent rate
   vDrag:22               // m/s^2 — vertical speed bleeds off fast when released, so it hovers
@@ -520,7 +519,6 @@ function driveStep(dt){
   carState.vspeed = Math.max(-FLIGHT.maxVSpeed, Math.min(FLIGHT.maxVSpeed, carState.vspeed));
   carState.altitude += carState.vspeed*dt;
   if(carState.altitude <= 0){ carState.altitude = 0; if(carState.vspeed<0) carState.vspeed = 0; }
-  if(carState.altitude >= FLIGHT.maxAltitude){ carState.altitude = FLIGHT.maxAltitude; if(carState.vspeed>0) carState.vspeed = 0; }
 
   updateLook(dt);
   return throttle;
