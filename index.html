@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Globe / Apple Maps-style</title>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/mapbox-gl/3.17.0/mapbox-gl.css" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mapbox-gl/3.17.0/mapbox-gl.js"></script>
+<style>
+  :root{
+    --day-bg1:#dfeaf5; --day-bg2:#aeb9c4;
+    --night-bg1:#070a10; --night-bg2:#03050a;
+    --accent:#3ea8ff;
+    --pin:#ff375f;
+    --glass-day:rgba(255,255,255,0.68);
+    --glass-day-border:rgba(20,30,45,0.10);
+    --text-day:#12181f;
+    --dim-day:#5b6672;
+    --glass-night:rgba(20,26,36,0.6);
+    --glass-night-border:rgba(255,255,255,0.09);
+    --text-night:#f1f5fa;
+    --dim-night:#8a97a8;
+    --glass:var(--glass-night); --glass-border:var(--glass-night-border);
+    --text:var(--text-night); --dim:var(--dim-night);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;
+    font-family:'Inter',sans-serif; color:var(--text); user-select:none; background:#03050a;}
+  #map{position:absolute;inset:0;}
+  .glass{background:var(--glass); border:1px solid var(--glass-border); backdrop-filter:blur(20px) saturate(170%);
+    transition:background .6s ease, border-color .6s ease;}
+
+  /* ===== Connect screen ===== */
+  #gate{position:absolute;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at 50% 30%, #101a2c 0%, #03050a 75%);}
+  #gate-card{width:min(430px,88vw); padding:34px 30px; border-radius:26px; text-align:center;}
+  .globe-icon{width:64px;height:64px;margin:0 auto 16px;border-radius:50%;position:relative;overflow:hidden;
+    background:radial-gradient(circle at 32% 28%, #7cd4ff, #1f6fb8 55%, #0b3862 100%);
+    box-shadow:0 0 30px rgba(62,168,255,0.45), inset -8px -8px 16px rgba(0,0,0,0.35);}
+  .globe-icon::before,.globe-icon::after{content:"";position:absolute;border:1px solid rgba(255,255,255,0.35);border-radius:50%;}
+  .globe-icon::before{width:100%;height:38%;top:31%;left:0; animation:spin1 6s linear infinite;}
+  .globe-icon::after{width:38%;height:100%;left:31%;top:0; animation:spin1 9s linear infinite reverse;}
+  @keyframes spin1{ from{transform:rotate(0deg) scaleX(1);} 50%{transform:rotate(180deg) scaleX(0.25);} to{transform:rotate(360deg) scaleX(1);} }
+  #gate-card h1{font-family:'Rajdhani',sans-serif; font-weight:700; font-size:24px; letter-spacing:0.3px; margin:0 0 6px;}
+  #gate-card .sub{font-size:12.5px; color:var(--dim-night); margin-bottom:22px; line-height:1.7;}
+  #gate-card label{display:block; font-size:10.5px; color:var(--dim-night); letter-spacing:0.1em; margin-bottom:6px; text-transform:uppercase; text-align:left;}
+  #gate-card input{width:100%; padding:12px 14px; border-radius:12px; border:1px solid var(--glass-night-border);
+    background:rgba(255,255,255,0.05); color:var(--text-night); font-family:'Inter',monospace; font-size:13px; margin-bottom:16px;}
+  #gate-card input:focus{outline:none; border-color:var(--accent);}
+  #gate-card button{width:100%; padding:14px; border:none; border-radius:14px; cursor:pointer;
+    background:linear-gradient(135deg,var(--accent),#1a6fc4); color:#04121a; font-family:'Rajdhani',sans-serif;
+    font-weight:700; font-size:16px; letter-spacing:0.06em;}
+  #gate-card button:active{transform:scale(0.97);}
+  #gate-err{font-size:11px; color:#ff8a8a; margin-top:10px; min-height:14px;}
+
+  /* ===== HUD ===== */
+  #hud{position:absolute; inset:0; pointer-events:none; z-index:20; display:none;}
+
+  #time-badge{position:absolute; top:calc(env(safe-area-inset-top,0px) + 12px); left:16px;
+    padding:6px 12px; border-radius:12px; font-family:'Rajdhani',sans-serif; font-weight:700; font-size:12px;
+    letter-spacing:0.06em; color:var(--dim); pointer-events:auto;}
+
+  #search-wrap{position:absolute; top:calc(env(safe-area-inset-top,0px) + 12px); left:50%; transform:translateX(-50%);
+    width:min(420px,72vw); pointer-events:auto;}
+  #search-pill{display:flex; align-items:center; gap:8px; padding:11px 16px; border-radius:18px;}
+  #search-pill input{flex:1; border:none; background:transparent; outline:none; color:var(--text);
+    font-family:'Inter',sans-serif; font-size:14px;}
+  #search-pill input::placeholder{color:var(--dim);}
+  #search-icon{font-size:14px; color:var(--dim);}
+
+  #controls{position:absolute; left:16px; bottom:calc(env(safe-area-inset-bottom,0px) + 30px);
+    display:flex; flex-direction:column; gap:10px; pointer-events:auto;}
+  .fab{width:46px; height:46px; border-radius:14px; display:flex; align-items:center; justify-content:center;
+    font-size:17px; color:var(--text);}
+  .fab.active{outline:2px solid var(--accent); outline-offset:2px;}
+  .fab:active{transform:scale(0.94);}
+
+  #info-sheet{position:absolute; left:50%; bottom:0; transform:translate(-50%,120%); width:min(460px,92vw);
+    padding:18px 22px calc(env(safe-area-inset-bottom,0px) + 18px); border-radius:22px 22px 0 0;
+    pointer-events:auto; transition:transform .35s cubic-bezier(.2,.9,.25,1);}
+  #info-sheet.show{transform:translate(-50%,0);}
+  #info-sheet .pin-row{display:flex; align-items:flex-start; gap:10px; margin-bottom:12px;}
+  #info-sheet .pin-dot{width:14px;height:14px;border-radius:50%;background:var(--pin);margin-top:4px;
+    box-shadow:0 0 8px rgba(255,55,95,0.7); flex-shrink:0;}
+  #info-sheet h3{margin:0 0 3px; font-family:'Rajdhani',sans-serif; font-weight:700; font-size:18px;}
+  #info-sheet .coord{font-size:11px; color:var(--dim); font-family:monospace;}
+  #info-sheet .btn-row{display:flex; gap:10px;}
+  #info-sheet .sbtn{flex:1; padding:11px; text-align:center; border-radius:13px; font-size:12.5px; font-weight:600;
+    background:rgba(62,168,255,0.14); color:var(--accent); cursor:pointer;}
+  #info-sheet .close-x{position:absolute; top:12px; right:14px; font-size:16px; color:var(--dim); cursor:pointer;}
+
+  #toast{position:absolute; left:50%; bottom:24px; transform:translateX(-50%) translateY(10px); opacity:0;
+    padding:9px 16px; border-radius:12px; font-size:12px; pointer-events:none; transition:opacity .25s ease, transform .25s ease; z-index:30;}
+
+  /* ===== Drive mode dimming for the explore chrome ===== */
+  #search-wrap, #controls{ transition:opacity .3s ease; }
+  body.drive-active #search-wrap, body.drive-active #controls{ opacity:0; pointer-events:none; }
+
+  /* ===== Joystick "doll" driver control ===== */
+  #joy-zone{position:absolute; right:16px; bottom:calc(env(safe-area-inset-bottom,0px) + 30px);
+    display:flex; flex-direction:column; align-items:center; gap:8px; pointer-events:auto; z-index:25;}
+  #joy-speed{padding:5px 12px; border-radius:10px; font-family:'Rajdhani',sans-serif; font-weight:700; font-size:13px;
+    opacity:0; transition:opacity .3s ease;}
+  #joy-speed span{font-size:9px; color:var(--dim); font-weight:600; margin-left:2px;}
+  body.drive-active #joy-speed{opacity:1;}
+  #joy-pad{width:104px; height:104px; border-radius:50%; position:relative;}
+  #joy-arrow{position:absolute; top:9px; left:50%; transform:translateX(-50%); font-size:11px; color:var(--dim); pointer-events:none;}
+  #joy-knob{position:absolute; left:50%; top:50%; width:50px; height:50px; margin:-25px 0 0 -25px;
+    border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:24px;
+    background:linear-gradient(135deg,var(--accent),#1a6fc4); box-shadow:0 4px 14px rgba(0,0,0,0.35);
+    cursor:grab; touch-action:none;}
+  body.drive-active #joy-knob{background:linear-gradient(135deg,#ff9f0a,#d9790a);}
+  #joy-hint{font-size:10px; color:var(--dim); letter-spacing:0.02em; transition:opacity .3s ease;}
+  body.drive-active #joy-hint{opacity:0;}
+
+  /* ===== 3D-style car marker (drive mode) ===== */
+  #car-marker{width:30px; height:50px; position:relative;}
+  #shadow-blob{position:absolute; left:50%; top:56%; transform:translate(-50%,-50%); width:36px; height:20px;
+    background:radial-gradient(ellipse, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0) 72%); z-index:0;}
+  #car-body{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:20px; height:40px;
+    border-radius:8px 8px 11px 11px; background:linear-gradient(180deg,#ff9f0a,#d9790a); z-index:2;
+    box-shadow:0 0 10px rgba(255,159,10,0.85), 0 0 20px rgba(255,159,10,0.4);}
+  #car-cabin{position:absolute; left:50%; top:38%; transform:translate(-50%,-50%); width:13px; height:18px;
+    border-radius:5px; background:rgba(6,16,24,0.75); z-index:3;}
+  .clight{position:absolute; width:4px; height:4px; border-radius:50%; z-index:3;}
+  .chead{background:#fff8d6; box-shadow:0 0 6px #fff3ad; top:4px;}
+  .chead.l{left:5px;} .chead.r{right:5px;}
+  .ctail{background:#ff4d4d; box-shadow:0 0 5px #ff4d4d; bottom:4px;}
+  .ctail.l{left:5px;} .ctail.r{right:5px;}
+  #toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div id="gate-card" class="glass">
+    <div class="globe-icon"></div>
+    <h1>世界一詳しい地球儀</h1>
+    <div class="sub">Mapboxのアクセストークンを入力してスタート。実際の3D地球儀の上に、都市の建物・地下鉄のラインカラー・昼夜の境界線までリアルタイムに再現します。</div>
+    <label>Mapbox Access Token</label>
+    <input id="token-input" type="text" placeholder="pk.eyJ1Ijoi..." autocomplete="off" spellcheck="false">
+    <button id="start-btn">地球を表示</button>
+    <div id="gate-err"></div>
+  </div>
+</div>
+
+<div id="map"></div>
+
+<div id="hud">
+  <div id="time-badge" class="glass">--:-- · ---</div>
+
+  <div id="search-wrap">
+    <div id="search-pill" class="glass">
+      <span id="search-icon">⌕</span>
+      <input id="search-input" type="text" placeholder="場所を検索">
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="fab glass" id="btn-layers" title="衛星写真に切替">🛰️</div>
+    <div class="fab glass" id="btn-tilt" title="3D傾き切替">◭</div>
+    <div class="fab glass" id="btn-locate" title="現在地">◎</div>
+  </div>
+
+  <div id="joy-zone">
+    <div id="joy-speed" class="glass">0<span>km/h</span></div>
+    <div id="joy-pad" class="glass">
+      <div id="joy-arrow">▲</div>
+      <div id="joy-knob"><span id="joy-doll">🧍</span></div>
+    </div>
+    <div id="joy-hint">WASDで運転 / Esc で解除</div>
+  </div>
+
+  <div id="info-sheet" class="glass">
+    <div class="close-x" id="sheet-close">✕</div>
+    <div class="pin-row">
+      <div class="pin-dot"></div>
+      <div>
+        <h3 id="sheet-title">—</h3>
+        <div class="coord" id="sheet-coord">—</div>
+      </div>
+    </div>
+    <div class="btn-row">
+      <div class="sbtn" id="sheet-dir">経路</div>
+      <div class="sbtn" id="sheet-share">共有</div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<script>
+/* ====================== THEME (time-of-day) ====================== */
+function getLightPreset(hour){
+  if(hour>=5 && hour<7) return 'dawn';
+  if(hour>=7 && hour<17) return 'day';
+  if(hour>=17 && hour<19) return 'dusk';
+  return 'night';
+}
+function applyTheme(preset){
+  const isDay = (preset==='day');
+  const root = document.documentElement.style;
+  root.setProperty('--glass', isDay?'var(--glass-day)':'var(--glass-night)');
+  root.setProperty('--glass-border', isDay?'var(--glass-day-border)':'var(--glass-night-border)');
+  root.setProperty('--text', isDay?'var(--text-day)':'var(--text-night)');
+  root.setProperty('--dim', isDay?'var(--dim-day)':'var(--dim-night)');
+  document.body.style.background = isDay
+    ? `linear-gradient(180deg,var(--day-bg1),var(--day-bg2))`
+    : `linear-gradient(180deg,var(--night-bg1),var(--night-bg2))`;
+  if(map && map.isStyleLoaded()){
+    try{ map.setConfigProperty('basemap','lightPreset',preset); }catch(e){}
+  }
+}
+function tick(){
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2,'0');
+  const mm = String(now.getMinutes()).padStart(2,'0');
+  const preset = getLightPreset(now.getHours());
+  document.getElementById('time-badge').textContent = `${hh}:${mm} · ${preset}`;
+  applyTheme(preset);
+}
+
+/* ====================== MAP ====================== */
+let map, currentStyle = 'standard';
+let autoSpinDone = false;
+const STYLES = {
+  standard: 'mapbox://styles/mapbox/standard',
+  satellite: 'mapbox://styles/mapbox/standard-satellite'
+};
+const TRANSIT_COLORS = ['match', ['get','class'],
+  'subway', '#ff9f0a',
+  'rail', '#3ea8ff',
+  'light_rail', '#32d74b',
+  'tram', '#ff375f',
+  'funicular', '#bf5af2',
+  'monorail', '#ffd60a',
+  '#8a97a8'
+];
+
+function configureStyle(){
+  const preset = getLightPreset(new Date().getHours());
+  try{
+    map.setConfigProperty('basemap','lightPreset', preset);
+    map.setConfigProperty('basemap','showPointOfInterestLabels', true);
+    map.setConfigProperty('basemap','show3dObjects', true);
+  }catch(e){}
+
+  map.setFog({
+    'space-color':'#03050f',
+    'star-intensity':0.55,
+    'color':'#1e2a4a',
+    'high-color':'#161b36',
+    'horizon-blend':0.04
+  });
+
+  if(map.getSource('composite')){
+    if(!map.getLayer('transit-glow')){
+      map.addLayer({
+        id:'transit-glow', type:'line', source:'composite', 'source-layer':'transit', slot:'middle',
+        filter:['in',['get','class'],['literal',['subway','rail','light_rail','tram','funicular','monorail']]],
+        paint:{
+          'line-color':TRANSIT_COLORS,
+          'line-opacity':0.5,
+          'line-blur':2.2,
+          'line-width':['interpolate',['linear'],['zoom'], 9,2.5, 16,9]
+        }
+      });
+    }
+    if(!map.getLayer('transit-lines')){
+      map.addLayer({
+        id:'transit-lines', type:'line', source:'composite', 'source-layer':'transit', slot:'middle',
+        filter:['in',['get','class'],['literal',['subway','rail','light_rail','tram','funicular','monorail']]],
+        paint:{
+          'line-color':TRANSIT_COLORS,
+          'line-opacity':0.95,
+          'line-width':['interpolate',['linear'],['zoom'], 9,0.6, 16,2.6]
+        }
+      });
+    }
+  }
+
+  // 3D GLB car model (Mapbox's official "ego car" asset), used as the drive-mode vehicle.
+  // Hidden until enterDriveMode() reveals it. Wrapped defensively: if the loaded GL JS
+  // build doesn't support model layers for any reason, driving itself must still work.
+  try{
+    if(!map.getSource(CAR_MODEL_SOURCE_ID)){
+      map.addSource(CAR_MODEL_SOURCE_ID, {
+        type:'model',
+        models:{ car:{ uri:CAR_MODEL_URI, position:[carState.lng||137, carState.lat||30], orientation:[0,0,0] } }
+      });
+      map.addLayer({
+        id:CAR_MODEL_LAYER_ID, type:'model', source:CAR_MODEL_SOURCE_ID, slot:'middle',
+        layout:{ visibility:'none' },
+        paint:{
+          'model-scale':[10,10,10],
+          'model-type':'location-indicator',
+          'model-cast-shadows':true,
+          'model-emissive-strength':0.3
+        }
+      });
+    }
+  }catch(err){
+    console.warn('3D car model layer unavailable, driving will continue without it:', err);
+  }
+}
+
+function spinGlobe(){
+  if(autoSpinDone) return;
+  const zoom = map.getZoom();
+  const maxSpinZoom = 5, slowSpinZoom = 3, secondsPerRevolution = 160;
+  if(zoom < maxSpinZoom){
+    let distPerSec = 360/secondsPerRevolution;
+    if(zoom > slowSpinZoom){
+      distPerSec *= (maxSpinZoom-zoom)/(maxSpinZoom-slowSpinZoom);
+    }
+    const center = map.getCenter();
+    center.lng -= distPerSec;
+    map.easeTo({ center, duration:1000, easing:n=>n });
+  }
+}
+
+function initMap(token){
+  mapboxgl.accessToken = token;
+  map = new mapboxgl.Map({
+    container:'map',
+    style:STYLES.standard,
+    center:[137, 30],
+    zoom:1.7,
+    pitch:0,
+    bearing:0,
+    maxPitch:85,
+    projection:'globe',
+    antialias:true
+  });
+
+  map.on('style.load', configureStyle);
+  map.on('load', ()=>{
+    document.getElementById('hud').style.display = 'block';
+    spinGlobe();
+  });
+  map.on('moveend', spinGlobe);
+  ['mousedown','touchstart','dragstart','zoomstart','rotatestart','pitchstart'].forEach(ev=>{
+    map.on(ev, ()=>{ if(!autoSpinDone){ autoSpinDone = true; map.stop(); } });
+  });
+
+  map.on('error', e=>{ console.error(e); showGateError('地図の読み込みに失敗しました。トークンを確認してください。'); });
+
+  setInterval(tick, 30000);
+  tick();
+}
+function showGateError(msg){ document.getElementById('gate-err').textContent = msg; }
+
+document.getElementById('start-btn').addEventListener('click', ()=>{
+  const token = document.getElementById('token-input').value.trim();
+  if(!token.startsWith('pk.')){ showGateError('Mapboxの公開トークン(pk.で始まる)を入力してください。'); return; }
+  showGateError('');
+  document.getElementById('gate').style.display = 'none';
+  initMap(token);
+});
+document.getElementById('token-input').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('start-btn').click(); });
+
+/* ====================== SEARCH ====================== */
+let marker = null;
+async function doSearch(q){
+  if(!q.trim()) return;
+  try{
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?limit=1&access_token=${mapboxgl.accessToken}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if(!data.features || !data.features.length){ toast('見つかりませんでした'); return; }
+    const f = data.features[0];
+    const [lng,lat] = f.center;
+    autoSpinDone = true;
+    map.flyTo({ center:[lng,lat], zoom:15.5, pitch:62, bearing:0, duration:3600, essential:true });
+    if(marker) marker.remove();
+    marker = new mapboxgl.Marker({ color:'#ff375f' }).setLngLat([lng,lat]).addTo(map);
+    document.getElementById('sheet-title').textContent = f.text || f.place_name;
+    document.getElementById('sheet-coord').textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    document.getElementById('info-sheet').classList.add('show');
+  }catch(e){ console.error(e); toast('検索に失敗しました'); }
+}
+document.getElementById('search-input').addEventListener('keydown', e=>{
+  if(e.key==='Enter') doSearch(e.target.value);
+});
+document.getElementById('search-icon').addEventListener('click', ()=> doSearch(document.getElementById('search-input').value));
+document.getElementById('sheet-close').addEventListener('click', ()=> document.getElementById('info-sheet').classList.remove('show'));
+document.getElementById('sheet-dir').addEventListener('click', ()=> toast('このデモでは経路案内は未実装です'));
+document.getElementById('sheet-share').addEventListener('click', ()=> toast('このデモでは共有は未実装です'));
+
+/* ====================== CONTROLS ====================== */
+document.getElementById('btn-layers').addEventListener('click', ()=>{
+  currentStyle = (currentStyle==='standard') ? 'satellite' : 'standard';
+  document.getElementById('btn-layers').classList.toggle('active', currentStyle==='satellite');
+  map.setStyle(STYLES[currentStyle]);
+});
+let tilted = false;
+document.getElementById('btn-tilt').addEventListener('click', ()=>{
+  tilted = !tilted;
+  document.getElementById('btn-tilt').classList.toggle('active', tilted);
+  map.easeTo({ pitch: tilted?60:0, duration:900 });
+});
+document.getElementById('btn-locate').addEventListener('click', ()=>{
+  if(!navigator.geolocation){ toast('この端末では現在地を取得できません'); return; }
+  navigator.geolocation.getCurrentPosition(pos=>{
+    autoSpinDone = true;
+    const {latitude,longitude} = pos.coords;
+    map.flyTo({ center:[longitude,latitude], zoom:15.5, pitch:60, duration:3200 });
+  }, ()=> toast('現在地を取得できませんでした'), { timeout:8000 });
+});
+
+/* ====================== TOAST ====================== */
+let toastTimer = null;
+function toast(msg){
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> el.classList.remove('show'), 1800);
+}
+
+/* ====================== DRIVE MODE ======================
+   First-person driving: WASD moves the car, arrow keys look around independently
+   of the heading, Esc exits. The doll stays as a touch-friendly entry point / throttle-steer.
+   The vehicle itself is Mapbox's official glTF "ego car" asset, rendered as a
+   'model-type: location-indicator' layer (see the model-layer examples in the docs). */
+const CAR_MODEL_URI = 'https://docs.mapbox.com/mapbox-gl-js/assets/ego_car.glb';
+const CAR_MODEL_SOURCE_ID = 'car-model-src';
+const CAR_MODEL_LAYER_ID = 'car-model-layer';
+// If the model appears to be facing sideways/backwards relative to travel, adjust this.
+const CAR_YAW_OFFSET = 0;
+
+const carState = { lng:0, lat:0, heading:0, speed:0 };
+
+// Two selectable vehicle presets. "car" hugs the ground; "plane" is the old
+// high, sweeping first-person view, kept exactly as a selectable mode.
+const VEHICLE = {
+  car:{
+    label:'車', icon:'🚗',
+    eyeHeight:1.15, forwardOffset:0.25,
+    pitchBase:89, pitchMin:77, pitchMax:89,
+    lookPitchMin:-12, lookPitchMax:5,
+    maxSpeed:26, accel:9, brakeDecel:16, drag:4.2, turnRateMax:75,
+    zoomHint:19
+  },
+  plane:{
+    label:'飛行機', icon:'✈️',
+    eyeHeight:220, forwardOffset:0,
+    pitchBase:80, pitchMin:55, pitchMax:85,
+    lookPitchMin:-25, lookPitchMax:20,
+    maxSpeed:60, accel:6, brakeDecel:10, drag:2.0, turnRateMax:35,
+    zoomHint:14
+  }
+};
+let vehicleMode = 'car';
+
+const LOOK = { yawRate:110, pitchRate:70, yawMax:110 };
+let driveMode = false, driveLoopId = null, lastDriveTs = null;
+let joyThrottle = 0, joySteer = 0;
+let lookYaw = 0, lookPitch = 0;
+const keyState = { w:false, s:false, a:false, d:false, left:false, right:false, up:false, down:false };
+
+function destPoint(lngLat, headingDeg, distMeters){
+  const rad = headingDeg*Math.PI/180;
+  const dNorth = distMeters*Math.cos(rad), dEast = distMeters*Math.sin(rad);
+  const latRad = lngLat[1]*Math.PI/180;
+  return [ lngLat[0] + dEast/(111320*Math.cos(latRad)), lngLat[1] + dNorth/111320 ];
+}
+function updateLook(dt){
+  const p = VEHICLE[vehicleMode];
+  const yawInput = (keyState.right?1:0) - (keyState.left?1:0);
+  const pitchInput = (keyState.up?1:0) - (keyState.down?1:0);
+  lookYaw = Math.max(-LOOK.yawMax, Math.min(LOOK.yawMax, lookYaw + yawInput*LOOK.yawRate*dt));
+  lookPitch = Math.max(p.lookPitchMin, Math.min(p.lookPitchMax, lookPitch + pitchInput*LOOK.pitchRate*dt));
+}
+function driveStep(dt){
+  const p = VEHICLE[vehicleMode];
+  const kt = (keyState.w?1:0) - (keyState.s?1:0);
+  const ks = (keyState.d?1:0) - (keyState.a?1:0);
+  const throttle = Math.max(-1, Math.min(1, joyThrottle + kt));
+  const steer = Math.max(-1, Math.min(1, joySteer + ks));
+
+  if(throttle>0) carState.speed += p.accel*throttle*dt;
+  else if(throttle<0) carState.speed += p.brakeDecel*throttle*dt;
+  else{
+    const s = Math.sign(carState.speed);
+    carState.speed -= s*p.drag*dt;
+    if(Math.sign(carState.speed)!==s) carState.speed = 0;
+  }
+  carState.speed = Math.max(-p.maxSpeed*0.4, Math.min(p.maxSpeed, carState.speed));
+
+  const speedFactor = Math.max(0.25, Math.min(1, Math.abs(carState.speed)/8));
+  let turn = steer*p.turnRateMax*speedFactor;
+  if(carState.speed < 0) turn = -turn;
+  carState.heading = (carState.heading + turn*dt + 360) % 360;
+
+  const rad = carState.heading*Math.PI/180;
+  const dist = carState.speed*dt;
+  const dNorth = dist*Math.cos(rad), dEast = dist*Math.sin(rad);
+  const latRad = carState.lat*Math.PI/180;
+  carState.lat += dNorth/111320;
+  carState.lng += dEast/(111320*Math.cos(latRad));
+
+  updateLook(dt);
+  return throttle;
+}
+function updateDriveCamera(throttleVal){
+  const p = VEHICLE[vehicleMode];
+  // Camera sits at the driver's-seat / cockpit position, offset from the model's
+  // own footprint by the active preset (ground-level for car, high for plane).
+  const eyePos = destPoint([carState.lng, carState.lat], carState.heading, p.forwardOffset);
+  const camPos = mapboxgl.MercatorCoordinate.fromLngLat(eyePos, p.eyeHeight);
+  const camera = map.getFreeCameraOptions();
+  camera.position = camPos;
+  const bearing = (carState.heading + lookYaw + 360) % 360;
+  const pitch = Math.max(p.pitchMin, Math.min(p.pitchMax, p.pitchBase + lookPitch));
+  camera.setPitchBearing(pitch, bearing);
+  map.setFreeCameraOptions(camera);
+
+  // Model update is separately try/caught: if this fails, the camera above must
+  // still have moved, so driving never silently freezes because of the model.
+  // Only shown in car mode — there's no plane model, and it'd sit oddly under a
+  // camera that's 200m up anyway.
+  try{
+    const modelSource = map.getSource(CAR_MODEL_SOURCE_ID);
+    if(modelSource && modelSource.setModels && vehicleMode==='car'){
+      const braking = throttleVal < -0.05 ? 1 : 0;
+      const brakePaint = {
+        'model-color': [0.85, 0.06, 0.06],
+        'model-color-mix-intensity': braking,
+        'model-emissive-strength': braking ? 0.9 : 0.15
+      };
+      modelSource.setModels({
+        car:{
+          uri:CAR_MODEL_URI,
+          position:[carState.lng, carState.lat],
+          orientation:[0, 0, carState.heading + CAR_YAW_OFFSET],
+          materialOverrides:{
+            'lights_brakes': brakePaint,
+            'lights-brakes_reverse': brakePaint,
+            'lights_brakes_volume': { ...brakePaint, 'model-opacity': braking },
+            'lights-brakes_reverse_volume': { ...brakePaint, 'model-opacity': braking }
+          }
+        }
+      });
+    }
+  }catch(err){
+    if(!updateDriveCamera._warned){ console.warn('Car model update failed (driving continues):', err); updateDriveCamera._warned = true; }
+  }
+}
+function updateDriveHUD(){
+  const kmh = Math.round(Math.abs(carState.speed*110));
+  document.getElementById('joy-speed').innerHTML = `${kmh}<span>km/h</span>`;
+}
+function driveLoop(ts){
+  if(lastDriveTs===null) lastDriveTs = ts;
+  const dt = Math.min(0.05, (ts-lastDriveTs)/1000);
+  lastDriveTs = ts;
+  try{
+    const throttleVal = driveStep(dt);
+    updateDriveCamera(throttleVal);
+    updateDriveHUD();
+  }catch(err){
+    console.error('driveLoop step failed:', err);
+  }
+  driveLoopId = requestAnimationFrame(driveLoop);
+}
+function setHandlers(enabled){
+  ['dragPan','dragRotate','scrollZoom','doubleClickZoom','touchZoomRotate','touchPitch','keyboard'].forEach(h=>{
+    if(map[h]){ enabled ? map[h].enable() : map[h].disable(); }
+  });
+}
+function enterDriveMode(){
+  if(driveMode) return;
+  driveMode = true;
+  autoSpinDone = true;
+  document.body.classList.add('drive-active');
+  setHandlers(false);
+  lookYaw = 0; lookPitch = 0; joyThrottle = 0; joySteer = 0;
+  Object.keys(keyState).forEach(k=> keyState[k]=false);
+
+  const c = map.getCenter();
+  carState.lng = c.lng; carState.lat = c.lat; carState.heading = map.getBearing()||0; carState.speed = 0;
+  if(map.getLayer(CAR_MODEL_LAYER_ID)) map.setLayoutProperty(CAR_MODEL_LAYER_ID, 'visibility', 'visible');
+
+  // Start driving on the very next frame — don't wait on a flyTo/moveend handshake,
+  // since setFreeCameraOptions() takes over the camera immediately anyway and any
+  // wait-for-animation step is just a chance for the loop to never start.
+  lastDriveTs = null;
+  if(driveLoopId) cancelAnimationFrame(driveLoopId);
+  driveLoopId = requestAnimationFrame(driveLoop);
+}
+function exitDriveMode(){
+  if(!driveMode) return;
+  driveMode = false;
+  document.body.classList.remove('drive-active');
+  if(driveLoopId){ cancelAnimationFrame(driveLoopId); driveLoopId = null; }
+  if(map.getLayer(CAR_MODEL_LAYER_ID)) map.setLayoutProperty(CAR_MODEL_LAYER_ID, 'visibility', 'none');
+  setHandlers(true);
+  map.easeTo({ pitch:0, bearing:0, duration:1400 });
+}
+
+/* keyboard: WASD drives, arrow keys look around, Esc exits */
+function isTypingTarget(){
+  const el = document.activeElement;
+  return el && (el.tagName==='INPUT' || el.tagName==='TEXTAREA');
+}
+window.addEventListener('keydown', e=>{
+  if(isTypingTarget()){ if(e.code==='Escape') e.target.blur(); return; }
+  switch(e.code){
+    case 'KeyW': keyState.w=true; if(!driveMode) enterDriveMode(); e.preventDefault(); break;
+    case 'KeyS': keyState.s=true; if(!driveMode) enterDriveMode(); e.preventDefault(); break;
+    case 'KeyA': keyState.a=true; if(!driveMode) enterDriveMode(); e.preventDefault(); break;
+    case 'KeyD': keyState.d=true; if(!driveMode) enterDriveMode(); e.preventDefault(); break;
+    case 'ArrowLeft': keyState.left=true; if(!driveMode) enterDriveMode(); e.preventDefault(); break;
+    case 'ArrowRight': keyState.right=true; if(!driveMode) enterDriveMode(); e.preventDefault(); break;
+    case 'ArrowUp': keyState.up=true; if(!driveMode) enterDriveMode(); e.preventDefault(); break;
+    case 'ArrowDown': keyState.down=true; if(!driveMode) enterDriveMode(); e.preventDefault(); break;
+    case 'Escape': exitDriveMode(); break;
+  }
+});
+window.addEventListener('keyup', e=>{
+  if(isTypingTarget()) return;
+  switch(e.code){
+    case 'KeyW': keyState.w=false; break;
+    case 'KeyS': keyState.s=false; break;
+    case 'KeyA': keyState.a=false; break;
+    case 'KeyD': keyState.d=false; break;
+    case 'ArrowLeft': keyState.left=false; break;
+    case 'ArrowRight': keyState.right=false; break;
+    case 'ArrowUp': keyState.up=false; break;
+    case 'ArrowDown': keyState.down=false; break;
+  }
+});
+
+/* joystick "doll": touch-friendly entry point + throttle/steer fallback */
+const joyPad = document.getElementById('joy-pad');
+const joyKnob = document.getElementById('joy-knob');
+const JOY_R = 34;
+let joyPointerId = null, joyDragStarted = false;
+
+joyKnob.addEventListener('pointerdown', e=>{
+  joyPointerId = e.pointerId;
+  joyKnob.setPointerCapture(e.pointerId);
+  joyDragStarted = false;
+  joyKnob.style.transition = 'none';
+});
+joyKnob.addEventListener('pointermove', e=>{
+  if(e.pointerId !== joyPointerId) return;
+  const rect = joyPad.getBoundingClientRect();
+  const cx = rect.left+rect.width/2, cy = rect.top+rect.height/2;
+  let dx = e.clientX-cx, dy = e.clientY-cy;
+  const d = Math.hypot(dx,dy);
+  if(d > 6) joyDragStarted = true;
+  if(d > JOY_R){ dx = dx/d*JOY_R; dy = dy/d*JOY_R; }
+  if(joyDragStarted){
+    if(!driveMode) enterDriveMode();
+    joyKnob.style.transform = `translate(${dx}px,${dy}px)`;
+    joySteer = dx/JOY_R;
+    joyThrottle = -(dy/JOY_R);
+  }
+});
+function joyRelease(e){
+  if(e.pointerId !== joyPointerId) return;
+  joyPointerId = null;
+  joyKnob.style.transition = 'transform .25s cubic-bezier(.2,.9,.25,1)';
+  joyKnob.style.transform = 'translate(0,0)';
+  joySteer = 0; joyThrottle = 0;
+  if(!joyDragStarted){
+    if(driveMode) exitDriveMode(); else enterDriveMode();
+  }
+}
+joyKnob.addEventListener('pointerup', joyRelease);
+joyKnob.addEventListener('pointercancel', joyRelease);
+</script>
+</body>
+</html>
