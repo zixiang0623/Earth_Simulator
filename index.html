@@ -482,7 +482,9 @@ function updateLook(dt){
 }
 function driveStep(dt){
   const p = CARPHYS;
-  const kt = (keyState.w?1:0) - (keyState.s?1:0);
+  // Forward/backward controls are intentionally inverted: W (and pushing the
+  // joystick up) reverses, while S (and pulling it down) moves forward.
+  const kt = (keyState.s?1:0) - (keyState.w?1:0);
   const ks = (keyState.d?1:0) - (keyState.a?1:0);
   const throttle = Math.max(-1, Math.min(1, joyThrottle + kt));
   const steer = Math.max(-1, Math.min(1, joySteer + ks));
@@ -693,7 +695,7 @@ joyKnob.addEventListener('pointermove', e=>{
     if(!driveMode) enterDriveMode();
     joyKnob.style.transform = `translate(${dx}px,${dy}px)`;
     joySteer = dx/JOY_R;
-    joyThrottle = -(dy/JOY_R);
+    joyThrottle = dy/JOY_R;
   }
 });
 function joyRelease(e){
